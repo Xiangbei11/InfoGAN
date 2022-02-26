@@ -1,35 +1,29 @@
 import openmdao.api as om 
-import omtools.api as ot
 import os
 import numpy as np 
-from lsdo_utils.comps.bspline_comp import  get_bspline_mtx, BsplineComp
-import matplotlib.pyplot as plt
-from geomdl import BSpline
 from scipy import interpolate
-parent_directory = os.getcwd()
-path  = 'coord_seligFmt-2'
+import matplotlib.pyplot as plt
+
+from lsdo_utils.comps.bspline_comp import  get_bspline_mtx, BsplineComp
+
+'''
+path  = 'coord_seligFmt/'
 x_range = np.linspace(0,1,300)
-j_vec = np.arange(0,len(x_range)+1)
-# x_range_stretched = 1 / (1 + np.exp(-12 * (x_range-0.5)))
-# x_range_stretched[0] = 0
-# x_range_stretched[-1] = 1
-x_range_stretched = 1 - np.cos(np.pi/(2 * len(x_range)) * j_vec )
-x_interp = x_range_stretched
-upper_cp_num = 8
-lower_cp_num = 8
-ctrl_points_upper = np.zeros((upper_cp_num,2,1532))
-ctrl_points_lower = np.zeros((lower_cp_num,2,1532))
+i_vec = np.arange(0,len(x_range)+1)
+x_interp = 1 - np.cos(np.pi/(2 * len(x_range)) * i_vec )
+upper_cp_num = 10
+lower_cp_num = 10
+ctrl_points_upper = np.zeros((upper_cp_num,2,1621))
+ctrl_points_lower = np.zeros((lower_cp_num,2,1621))
 upper_B_spline_mat = get_bspline_mtx(upper_cp_num, len(x_interp), order = 4)
 lower_B_spline_mat = get_bspline_mtx(lower_cp_num, len(x_interp), order = 4)
 file_list = []
 counter = 0
-for file in os.listdir():
+for file in os.listdir(path):
     # Check whether file is in .dat format or not
     if file.endswith(".dat"):
         file_path = f"{path}/{file}"
         # printing airfoil file name to track anomalies/ bad airfoils
-        print('#########################')
-        print(file)
         file_list.append(file)
         airfoil = open(file_path)
         lines = airfoil.readlines()[1:]
@@ -73,17 +67,119 @@ for file in os.listdir():
         x_lower[0,1] = 0
         x_lower[-1,0] = 1
         x_lower[-1,1] = 0
-    ctrl_points_upper[:,:,counter] = x_upper
-    ctrl_points_lower[:,:,counter] = x_lower
-    counter = counter + 1
-    print(counter)
-    # print('#########################')
+        ctrl_points_upper[:,:,counter] = x_upper
+        ctrl_points_lower[:,:,counter] = x_lower
+        counter = counter + 1
+
 y_ctrl_points_upper = ctrl_points_upper[:,1,:]
 y_ctrl_points_lower = ctrl_points_lower[:,1,:]
 x_ctrl_points_upper = ctrl_points_upper[:,0,:]
 x_ctrl_points_lower = ctrl_points_lower[:,0,:]
 total_y_control_points = np.concatenate((y_ctrl_points_upper,y_ctrl_points_lower))
 total_x_control_points = np.concatenate((x_ctrl_points_upper,x_ctrl_points_lower))
+print(counter)
+'''
+curve_y_coords = np.loadtxt('txt_files/training_airfoils_y_coordinates.txt').T.astype(np.float32)
+curve_x_coords = np.loadtxt('txt_files/training_airfoils_x_coordinates.txt').astype(np.float32)
+training_size = curve_y_coords.shape[0]
+latent_dim = 20
+physical_parameters = np.zeros((training_size,6))
+fft_latent_parameters = np.zeros((training_size,latent_dim))
+fft_latent_parameters_fake = np.zeros((training_size,latent_dim))
+for i in range(training_size):
+    upper_surface = curve_y_coords[i,0:301]
+    lower_surface = curve_y_coords[i,301:602]
+
+    # Camber
+    camber = (upper_surface + lower_surface) / 2
+    average_camber = np.average(camber)
+    max_camber = max(abs(camber))
+    # if average_camber < 0:
+    #     max_camber = max(abs(camber))
+    #     max_camber_index = np.where(camber == -1 * max_camber)[0][0]
+    #     max_camber_x = curve_x_coords[0:301,0][max_camber_index]
+    #     max_camber_y = camber[max_camber_index]
+    # else:
+    #     max_camber = max(camber)
+    #     max_camber_index = np.where(camber == max_camber)[0][0]
+    #     max_camber_x = curve_x_coords[0:301,0][max_camber_index]
+    #     max_camber_y = camber[max_camber_index]
+
+    # Thickness
+    thickness = abs(upper_surface - lower_surface)
+    max_thickness = max(thickness)
+
+    max_thickness_index = np.where(thickness == max_thickness)[0][0]
+    max_thickness_x = curve_x_coords[0:301,0][max_thickness_index]
+    max_thickness_y_upper = upper_surface[max_thickness_index]
+    max_thickness_y_lower = lower_surface[max_thickness_index]
+    x_thickness = [max_thickness_x, max_thickness_x]
+    y_thickness = [max_thickness_y_upper, max_thickness_y_lower] 
+    max_thickness_x_loc = max_thickness_x
+
+    # LE/TE angle
+    x_der = 0.02
+    x_der_TE = 0.98
+    tck_camber = interpolate.splrep(curve_x_coords[0:301,0],camber)
+
+    y_der_camber_LE = interpolate.splev(x_der,tck_camber)
+    dydx_camber_LE= interpolate.splev(x_der,tck_camber,der=1)
+    LE_angle = np.arctan(dydx_camber_LE) * 180 / np.pi
+
+    
+    y_der_camber_TE = interpolate.splev(x_der_TE,tck_camber)
+    dydx_camber_TE = interpolate.splev(x_der_TE,tck_camber,der=1)
+    TE_angle = np.arctan(dydx_camber_TE) * 180 / np.pi
+
+    n = 30
+    radius_upper = np.empty((n,))
+    radius_lower = np.empty((n,))
+    for k in range(n):
+        radius_upper[k] = ((upper_surface[k] - 0)**2 + (curve_x_coords[0:301,0][k] - 0.02)**2)**0.5
+        radius_lower[k] = ((lower_surface[k] - 0)**2 + (curve_x_coords[0:301,0][k] - 0.02)**2)**0.5
+    #LE_diameter = abs(upper_surface[35] - lower_surface[35])
+    RU = np.average(radius_upper)
+    RL = np.average(radius_lower)    
+    R = (RU + RL) / 2
+
+    physical_parameters[i,0] = max_camber
+    physical_parameters[i,1] = max_thickness
+    physical_parameters[i,2] = max_thickness_x_loc
+    physical_parameters[i,3] = LE_angle
+    physical_parameters[i,4] = TE_angle
+    physical_parameters[i,5] = R
+
+    camber_fft = np.fft.fft(camber)
+    thickness_fft = np.fft.fft(thickness)
+
+    fft_latent_parameters[i,0] = camber_fft[0].real
+    fft_latent_parameters[i,1] = camber_fft[1].real
+    fft_latent_parameters[i,2] = camber_fft[2].real
+    fft_latent_parameters[i,3] = camber_fft[3].real
+    fft_latent_parameters[i,4] = camber_fft[4].real
+    fft_latent_parameters[i,5] = camber_fft[5].real
+    fft_latent_parameters[i,6] = camber_fft[6].real
+    fft_latent_parameters[i,7] = camber_fft[7].real
+    fft_latent_parameters[i,8] = camber_fft[8].real
+    fft_latent_parameters[i,9] = camber_fft[9].real
+    fft_latent_parameters[i,10] = thickness_fft[0].real
+    fft_latent_parameters[i,11] = thickness_fft[1].real
+    fft_latent_parameters[i,12] = thickness_fft[2].real
+    fft_latent_parameters[i,13] = thickness_fft[3].real
+    fft_latent_parameters[i,14] = thickness_fft[4].real
+    fft_latent_parameters[i,15] = thickness_fft[5].real
+    fft_latent_parameters[i,16] = thickness_fft[6].real
+    fft_latent_parameters[i,17] = thickness_fft[7].real
+    fft_latent_parameters[i,18] = thickness_fft[8].real
+    fft_latent_parameters[i,19] = thickness_fft[9].real
+    fft_latent_parameters_fake[i,0:10] = camber_fft[0:10].real
+    fft_latent_parameters_fake[i,10:20] = thickness_fft[0:10].real
+print(np.all(((fft_latent_parameters_fake-fft_latent_parameters) ==0)))
+exit()
+np.savetxt('txt_files/parameters_physical.txt', physical_parameters)
+np.savetxt('txt_files/parameters_fft_latent.txt',fft_latent_parameters)
+
+
 # np.savetxt('X_CONTROL_POINTS_NEW.txt', total_x_control_points)
 # np.savetxt('Y_CONTROL_POINTS_NEW.txt', total_y_control_points)
 # os.chdir(parent_directory)
@@ -213,7 +309,6 @@ for i in range(1532):
     y_coord_lower = y_coord[min_index:]
     axs[0].plot(x_coord_upper,y_coord_upper,marker = 'o',markersize = 2, color = 'maroon', label = 'Raw data')
     axs[0].plot(x_coord_lower,y_coord_lower,marker = 'o',markersize = 2, color = 'maroon')
-    os.chdir(parent_directory)
     axs[0].plot(x_interp, prob['upper_B_spline_curve'],color = 'navy', label = 'B-spline')
     axs[0].plot(x_interp, prob['lower_B_spline_curve'], color = 'navy' )
     xs = ctrl_points_upper[:,0,i] 

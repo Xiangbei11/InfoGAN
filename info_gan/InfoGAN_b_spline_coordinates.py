@@ -79,6 +79,8 @@ class Generator(nn.Module):
         r_adjacent = torch.mean(cp_adjacent)
         cp_nonintersection = control_y_coords_fake[:,:10] - control_y_coords_fake[:,10:]
         r_nonintersection = torch.mean(torch.maximum(torch.zeros(cp_nonintersection.shape), cp_nonintersection))
+        print(cp_nonintersection.shape)
+        print(r_nonintersection)
         return curve_y_coords_fake, r_adjacent, r_nonintersection
 
 class Discriminator(nn.Module):
@@ -166,24 +168,25 @@ def train(net_D, net_G, data_iter, num_epochs, lr_D, lr_G, lr_info, noise_dim, l
         
 
 # Comment out lines 177 to 187 if you just want to run a trained generator
-lr_D, lr_G,lr_info, num_epochs = 0.00001, 0.00001, 0.00001,  50 #50
-train(net_D, net_G, data_iter, num_epochs, lr_D, lr_G, lr_info,
-      noise_dim, latent_dim)
+lr_D, lr_G,lr_info, num_epochs = 0.00001, 0.00001, 0.00001, 50 #50
+test_str = '_coordinates_test0_' + "%s"%num_epochs
 
-test_str = '_test0'
-plt.figure(figsize=(8,6))
-plt.plot(range(num_epochs), loss_G_list)
-plt.plot(range(num_epochs), loss_D_list)
-plt.plot(range(num_epochs), loss_info_list)
-plt.legend(['Generator', 'Discriminator','Infomation'])
-plt.savefig('figures/Loss_coordinates'+test_str)
+train(net_D, net_G, data_iter, num_epochs, lr_D, lr_G, lr_info, noise_dim, latent_dim)
+
+# plt.figure(figsize=(8,6))
+# plt.plot(range(num_epochs), loss_G_list)
+# plt.plot(range(num_epochs), loss_D_list)
+# plt.plot(range(num_epochs), loss_info_list)
+# plt.legend(['Generator', 'Discriminator','Infomation'])
+# plt.savefig('figures/Loss'+test_str)
 
 # # Saving trained generator: IF YOU JUST WANT TO RUN A TRAINED GENERATOR, COMMENT OUT LINE 192! 
-generator_model_path =  '/GAN_GENERATOR_coordinates' +test_str
-torch.save(net_G.state_dict(),generator_model_path)
+generator_model_path =  'GAN_GENERATOR' +test_str
+#torch.save(net_G.state_dict(),generator_model_path)
 
 Gen = Generator()
 Gen.load_state_dict(torch.load(generator_model_path))
+x_bspline = np.loadtxt('txt_files/training_airfoils_x_coordinates.txt').astype(np.float32)
 
 # Generating random airfoils for each latent variable 
 test_size = 10
@@ -197,36 +200,32 @@ for latent_c in range(latent_dim):
         C[i,latent_c] = latent_code[i]
     fake_data_test,_ ,_ = Gen(torch.cat((Z,C),-1))
     fake_data_test = fake_data_test.detach().numpy()
-    x_bspline = np.loadtxt('training_airfoils_y_coordinates.txt').astype(np.float32)
     color = plt.cm.rainbow(np.linspace(0, 1, test_size))
     for i, c in zip(range(test_size), color):
         axs[latent_c].plot(x_bspline[0:301,0], fake_data_test[i,0:301], c = c, label='C_'+' = {0}'.format(round(latent_code[i],2)))
         axs[latent_c].plot(x_bspline[0:301,0], fake_data_test[i,301:602], c = c)    
 
 fig.tight_layout()
-plt.savefig('figures/Fake_airfoil_coordinates'+test_str)
+plt.savefig('figures/Fake_airfoil'+test_str)
 
-test_size = 150000
+print('Start')
+test_size = 100000
 Z = torch.zeros(test_size,noise_dim)
 C = torch.zeros(test_size,latent_dim)
 for i in range(test_size):
     latent_code = torch.normal(0,1,size = (1,latent_dim))
-    for j in range(latent_dim):
-        if latent_code[0][:][j] > 2:
-            latent_code[0][:][j] = 2
-        if latent_code[0][:][j] < -2:
-            latent_code[0][:][j] = -2
     C[i,:] = latent_code
+C[C>2] = 2
+C[C<-2] = -2
 fake_data_test,_ ,_ = Gen(torch.cat((Z,C),-1))
 fake_data_test = fake_data_test.detach().numpy()
-x_bspline = np.loadtxt('airfoil_x_coordinates.txt').astype(np.float32)
-
-fig, axs = plt.subplots(1,1, figsize= (14,8))
-original_latent_parameters = np.zeros((test_size,6))
+print('End')
+physical_parameters = np.zeros((test_size,6))
 fft_latent_parameters = np.zeros((test_size,latent_dim))
 
 for i in range(test_size):
-    print(i)
+    if i % 5000 == 0:
+        print(i)
     upper_surface = fake_data_test[i,0:301]
     lower_surface = fake_data_test[i,301:602]
 
@@ -245,7 +244,17 @@ for i in range(test_size):
     #     max_camber_x = x_bspline[0:301,0][max_camber_index]
     #     max_camber_y = camber[max_camber_index]
 
-    
+    # Thickness
+    thickness = abs(upper_surface - lower_surface)
+    max_thickness = max(thickness)
+
+    max_thickness_index = np.where(thickness == max_thickness)[0][0]
+    max_thickness_x = x_bspline[0:301,0][max_thickness_index]
+    max_thickness_y_upper = upper_surface[max_thickness_index]
+    max_thickness_y_lower = lower_surface[max_thickness_index]
+    x_thickness = [max_thickness_x, max_thickness_x]
+    y_thickness = [max_thickness_y_upper, max_thickness_y_lower] 
+    max_thickness_x_loc = max_thickness_x
 
     # LE/TE angle
     x_der = 0.02
@@ -257,28 +266,9 @@ for i in range(test_size):
     LE_angle = np.arctan(dydx_camber_LE) * 180 / np.pi
 
     
-
     y_der_camber_TE = interpolate.splev(x_der_TE,tck_camber)
     dydx_camber_TE = interpolate.splev(x_der_TE,tck_camber,der=1)
     TE_angle = np.arctan(dydx_camber_TE) * 180 / np.pi
-
-    
-
-
-    # Thickness
-    thickness = abs(upper_surface) + abs(lower_surface)
-    max_thickness = max(thickness)
-
-    max_thickness_index = np.where(thickness == max_thickness)[0][0]
-    max_thickness_x = x_bspline[0:301,0][max_thickness_index]
-
-    max_thickness_y_upper = upper_surface[max_thickness_index]
-    max_thickness_y_lower = lower_surface[max_thickness_index]
-    x_thickness = [max_thickness_x, max_thickness_x]
-    y_thickness = [max_thickness_y_upper, max_thickness_y_lower] 
-
-    max_thickness_x_loc = max_thickness_x
-
 
     n = 30
     radius_upper = np.empty((n,))
@@ -286,49 +276,20 @@ for i in range(test_size):
     for k in range(n):
         radius_upper[k] = ((upper_surface[k] - 0)**2 + (x_bspline[0:301,0][k] - 0.02)**2)**0.5
         radius_lower[k] = ((lower_surface[k] - 0)**2 + (x_bspline[0:301,0][k] - 0.02)**2)**0.5
-
-    # print(abs(upper_surface[30] - lower_surface[30]))
-    # print(abs(upper_surface[35] - lower_surface[35]))
-    LE_diameter = abs(upper_surface[35] - lower_surface[35])
-
+    #LE_diameter = abs(upper_surface[35] - lower_surface[35])
     RU = np.average(radius_upper)
-    RL = np.average(radius_lower)
-    
+    RL = np.average(radius_lower)    
     R = (RU + RL) / 2
-    # print(R)
 
-    original_latent_parameters[i,0] = max_camber
-    original_latent_parameters[i,1] = max_thickness
-    original_latent_parameters[i,2] = max_thickness_x_loc
-    original_latent_parameters[i,3] = LE_angle
-    original_latent_parameters[i,4] = TE_angle
-    original_latent_parameters[i,5] = R
+    physical_parameters[i,0] = max_camber
+    physical_parameters[i,1] = max_thickness
+    physical_parameters[i,2] = max_thickness_x_loc
+    physical_parameters[i,3] = LE_angle
+    physical_parameters[i,4] = TE_angle
+    physical_parameters[i,5] = R
 
     camber_fft = np.fft.fft(camber)
     thickness_fft = np.fft.fft(thickness)
-
-
-    # latent_parameters[i,0] = camber[10]
-    # latent_parameters[i,1] = camber[20]
-    # latent_parameters[i,2] = camber[50]
-    # latent_parameters[i,3] = camber[90]
-    # latent_parameters[i,4] = camber[130]
-    # latent_parameters[i,5] = camber[170]
-    # latent_parameters[i,6] = camber[210]
-    # latent_parameters[i,7] = camber[250]
-    # latent_parameters[i,8] = camber[280]
-    # latent_parameters[i,9] = camber[290]
-    # latent_parameters[i,10] = thickness[10]
-    # latent_parameters[i,11] = thickness[20]
-    # latent_parameters[i,12] = thickness[50]
-    # latent_parameters[i,13] = thickness[90]
-    # latent_parameters[i,14] = thickness[130]
-    # latent_parameters[i,15] = thickness[170]
-    # latent_parameters[i,16] = thickness[210]
-    # latent_parameters[i,17] = thickness[250]
-    # latent_parameters[i,18] = thickness[280]
-    # latent_parameters[i,19] = thickness[290]
-
 
     fft_latent_parameters[i,0] = camber_fft[0].real
     fft_latent_parameters[i,1] = camber_fft[1].real
@@ -352,31 +313,41 @@ for i in range(test_size):
     fft_latent_parameters[i,19] = thickness_fft[9].real
 
 
-
-np.savetxt('generated_original_latent_parameters.txt',original_latent_parameters)
-np.savetxt('generated_fft_latent_parameters.txt',fft_latent_parameters)
-
+np.savetxt('txt_files/generated_parameters_physical.txt', physical_parameters)
+np.savetxt('txt_files/generated_parameters_fft_latent.txt',fft_latent_parameters)
 
 fig, axs = plt.subplots(2,3, figsize= (14,8))
-generated_latent_code = np.loadtxt('generated_original_latent_parameters.txt')
-training_latent_code = np.loadtxt('original_latent_parameters.txt')
-fft_latent_parameter = np.arange(1,21,1)
-original_latent_parameter = ['Max camber', 'Max thickness', 'x-coord max thickness', 'LE angle', 'TE angle', 'LE radius']
-
+generated_physical_parameters = physical_parameters#np.loadtxt('generated_parameters_physical.txt')
+training_physical_parameters = np.loadtxt('txt_files/parameters_physical.txt')
+physical_parameters_label = ['Max camber', 'Max thickness', 'x-coord max thickness', 'LE angle', 'TE angle', 'LE radius']
 for i in range(2):
     for j in range(3):
         index = 3 * i + j 
-        axs[i,j].hist(generated_latent_code[:,index],density = True, bins = 120, color = 'blue',alpha = 0.5, label = 'GAN generated original latent code')
-        axs[i,j].hist(training_latent_code[:,index],density = True, bins = 120, color = 'red',alpha = 0.5, label = 'Training original latent code')
-        title_string = original_latent_parameter[index]
+        axs[i,j].hist(generated_physical_parameters[:,index],density = True, bins = 120, color = 'blue',alpha = 0.5, label = 'GAN generated airfoils')
+        axs[i,j].hist(training_physical_parameters[:,index],density = True, bins = 120, color = 'red',alpha = 0.5, label = 'Training airfoils')
+        title_string = physical_parameters_label[index]
         axs[i,j].title.set_text(title_string)
-        if (i == 1) and (j == 2):
-            axs[i,j].legend()
-            # handles, labels = axs[i,j].get_legend_handles_labels()
+        if (i == 0) and (j == 0):
+            axs[i,j].legend(loc = 'upper right')
 
 # fig.legend(handles, labels, ncol= 2,loc='upper center')
 fig.tight_layout()
-plt.show()
-exit()
+plt.savefig('figures/Histogram_physical'+test_str)
+
+fig, axs = plt.subplots(5,4, figsize= (14,8))
+generated_fft_latent_parameters = fft_latent_parameters
+training_fft_latent_parameters = np.loadtxt('txt_files/parameters_fft_latent.txt')
+for i in range(5):
+    for j in range(4):
+        index = 4 * i + j 
+        axs[i,j].hist(generated_fft_latent_parameters[:,index],density = True, bins = 120, color = 'blue',alpha = 0.5, label = 'GAN generated airfoils')
+        axs[i,j].hist(training_fft_latent_parameters[:,index],density = True, bins = 120, color = 'red',alpha = 0.5, label = 'Training airfoils')
+        axs[i,j].title.set_text('Latent parameter c_'+ "%s"%index)
+        if (i == 0) and (j == 0):
+            axs[i,j].legend(loc = 'upper right')
+
+# fig.legend(handles, labels, ncol= 2,loc='upper center')
+fig.tight_layout()
+plt.savefig('figures/Histogram_fft_latent'+test_str)
 plt.show()
 exit()

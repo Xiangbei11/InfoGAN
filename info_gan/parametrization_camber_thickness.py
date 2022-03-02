@@ -64,8 +64,8 @@ total_camber_thickness = np.concatenate((training_camber,training_thickness))
 print('total_control_points',total_control_points.shape)
 print('total_camber_thickness',total_camber_thickness.shape)
 
-np.savetxt('txt_files/20_camber_thickness_b_spline_cp.txt', total_control_points)
-np.savetxt('txt_files/training_airfoils_camber_thickness.txt', total_camber_thickness )
+# np.savetxt('txt_files/20_camber_thickness_b_spline_cp.txt', total_control_points)
+# np.savetxt('txt_files/training_airfoils_camber_thickness.txt', total_camber_thickness )
 
 curve_x_coords = np.loadtxt('txt_files/training_airfoils_x_coordinates.txt').astype(np.float32)
 print('curve_x_coords',curve_x_coords.shape)
@@ -92,7 +92,7 @@ curve_camber_thickness = np.concatenate((curve_y_coords_camber, curve_y_coords_t
 range0 = range(0, 301, 10)
 range1 = range(301, 602, 10)
 test_size0 = 9
-test_size1 = 6
+test_size1 = 3
 fig, axs = plt.subplots(3, 3, figsize=(15,7.2))#
 axs = axs.flatten()
 for i in range(test_size0):
@@ -100,8 +100,8 @@ for i in range(test_size0):
     for j, c in zip(range(test_size1), color):
         axs[i].plot(curve_x_coords[0:301,0].reshape((301,1)), (curve_camber_thickness[test_size1*i+j,0:301]+0.5*curve_camber_thickness[test_size1*i+j,301:602]).reshape((301,1)), c = c)
         axs[i].plot(curve_x_coords[0:301,0].reshape((301,1)), (curve_camber_thickness[test_size1*i+j,0:301]-0.5*curve_camber_thickness[test_size1*i+j,301:602]).reshape((301,1)), c = c)
-        axs[i].plot(curve_x_coords[range0,0], curve_y_coords[test_size1*i+j,range0], c = c, marker = '*', markersize = 3, linestyle = 'None',)
-        axs[i].plot(curve_x_coords[range0,0], curve_y_coords[test_size1*i+j,range1], c = c, marker = '*', markersize = 3, linestyle = 'None',)    
+        axs[i].plot(curve_x_coords[range0,0], curve_y_coords[test_size1*i+j,range0], c = c, lw = 5, alpha = 0.5)
+        axs[i].plot(curve_x_coords[range0,0], curve_y_coords[test_size1*i+j,range1], c = c, lw = 5, alpha = 0.5)    
 
 fig.tight_layout()
 plt.show()
